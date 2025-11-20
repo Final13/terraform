@@ -46,11 +46,11 @@ jobs:
           TABLE_NAME="Final"
           REGION="us-east-1"
           STATE_KEY="dev/eks-cluster/terraform.tfstate"
-          
+
           echo "=== Checking S3 bucket: $BUCKET_NAME ==="
           ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
           echo "Current AWS Account ID: $ACCOUNT_ID"
-          
+
           if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
             echo "S3 bucket exists"
             BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query LocationConstraint --output text)
@@ -79,35 +79,11 @@ jobs:
             aws s3api put-bucket-encryption --bucket "$BUCKET_NAME" --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
             aws s3api put-public-access-block --bucket "$BUCKET_NAME" --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
             
-            BUCKET_POLICY=$(cat <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "TerraformStateAccess",
-      "Effect": "Allow",
-      "Principal": {
-        "AWS": "arn:aws:iam::${ACCOUNT_ID}:root"
-      },
-      "Action": [
-        "s3:GetObject",
-        "s3:PutObject",
-        "s3:ListBucket"
-      ],
-      "Resource": [
-        "arn:aws:s3:::${BUCKET_NAME}",
-        "arn:aws:s3:::${BUCKET_NAME}/*"
-      ]
-    }
-  ]
-}
-EOF
-)
             echo "Setting bucket policy..."
-            echo "$BUCKET_POLICY" | aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy file:///dev/stdin
+            aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy "{\"Version\":\"2012-10-17\",\"Statement\":[{\"Sid\":\"TerraformStateAccess\",\"Effect\":\"Allow\",\"Principal\":{\"AWS\":\"arn:aws:iam::${ACCOUNT_ID}:root\"},\"Action\":[\"s3:GetObject\",\"s3:PutObject\",\"s3:ListBucket\"],\"Resource\":[\"arn:aws:s3:::${BUCKET_NAME}\",\"arn:aws:s3:::${BUCKET_NAME}/*\"]}]}"
             echo "S3 bucket created successfully"
           fi
-          
+
           echo ""
           echo "=== Checking DynamoDB table: $TABLE_NAME ==="
           if aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" 2>/dev/null; then
@@ -125,7 +101,7 @@ EOF
             aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION"
             echo "DynamoDB table created successfully"
           fi
-          
+
           echo ""
           echo ""
           echo "=== Testing backend access ==="
@@ -141,7 +117,7 @@ EOF
             echo "  2. IAM user has s3:PutObject, s3:GetObject, s3:ListBucket permissions"
             echo "  3. Bucket policy allows access for your account"
           fi
-          
+
           echo "Testing DynamoDB write access..."
           if aws dynamodb put-item --table-name "$TABLE_NAME" --item '{"LockID":{"S":"test-lock"}}' --region "$REGION" 2>&1; then
             aws dynamodb delete-item --table-name "$TABLE_NAME" --key '{"LockID":{"S":"test-lock"}}' --region "$REGION" 2>&1
@@ -150,7 +126,7 @@ EOF
             echo "✗ DynamoDB write access FAILED"
             echo "Please check IAM user has dynamodb:PutItem, dynamodb:GetItem, dynamodb:DeleteItem permissions"
           fi
-          
+
           echo ""
           echo "Backend setup completed!"
 
