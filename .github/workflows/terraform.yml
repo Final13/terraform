@@ -35,6 +35,11 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Verify AWS credentials
+        run: |
+          aws sts get-caller-identity
+          aws s3 ls s3://terraform-state-bucket-final/ || echo "Cannot list bucket"
+
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
