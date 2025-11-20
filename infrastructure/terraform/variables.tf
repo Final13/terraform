@@ -7,7 +7,7 @@ variable "aws_region" {
 variable "project_name" {
   description = "Project name"
   type        = string
-  default     = "fenics-app"
+  default     = "Terraform"
 }
 
 variable "environment" {
@@ -49,6 +49,6 @@ variable "node_max_size" {
 variable "ecr_repository_name" {
   description = "Name of ECR repository"
   type        = string
-  default     = "fenics-app"
+  default     = "Terraform"
 }
 
