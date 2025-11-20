@@ -45,10 +45,29 @@ jobs:
           BUCKET_NAME="terraform-state-bucket-final"
           TABLE_NAME="Final"
           REGION="us-east-1"
-
-          echo "Checking S3 bucket: $BUCKET_NAME"
-          if aws s3 ls "s3://$BUCKET_NAME" 2>/dev/null; then
-            echo "S3 bucket already exists"
+          STATE_KEY="dev/eks-cluster/terraform.tfstate"
+          
+          echo "=== Checking S3 bucket: $BUCKET_NAME ==="
+          ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+          echo "Current AWS Account ID: $ACCOUNT_ID"
+          
+          if aws s3api head-bucket --bucket "$BUCKET_NAME" 2>/dev/null; then
+            echo "S3 bucket exists"
+            BUCKET_REGION=$(aws s3api get-bucket-location --bucket "$BUCKET_NAME" --query LocationConstraint --output text)
+            BUCKET_REGION=${BUCKET_REGION:-us-east-1}
+            echo "Bucket region: $BUCKET_REGION"
+            echo "Expected region: $REGION"
+            if [ "$BUCKET_REGION" != "$REGION" ]; then
+              echo "WARNING: Bucket region mismatch!"
+            fi
+            echo "Checking permissions..."
+            aws s3 ls "s3://$BUCKET_NAME/" || echo "WARNING: Cannot list bucket contents"
+            if aws s3api head-object --bucket "$BUCKET_NAME" --key "$STATE_KEY" 2>/dev/null; then
+              echo "State file exists, checking read access..."
+              aws s3 cp "s3://$BUCKET_NAME/$STATE_KEY" /dev/null 2>&1 || echo "WARNING: Cannot read state file (will be created on first apply)"
+            else
+              echo "State file does not exist yet (will be created on first apply)"
+            fi
           else
             echo "Creating S3 bucket: $BUCKET_NAME"
             if [ "$REGION" = "us-east-1" ]; then
@@ -59,12 +78,41 @@ jobs:
             aws s3api put-bucket-versioning --bucket "$BUCKET_NAME" --versioning-configuration Status=Enabled
             aws s3api put-bucket-encryption --bucket "$BUCKET_NAME" --server-side-encryption-configuration '{"Rules":[{"ApplyServerSideEncryptionByDefault":{"SSEAlgorithm":"AES256"}}]}'
             aws s3api put-public-access-block --bucket "$BUCKET_NAME" --public-access-block-configuration "BlockPublicAcls=true,IgnorePublicAcls=true,BlockPublicPolicy=true,RestrictPublicBuckets=true"
+            
+            BUCKET_POLICY=$(cat <<EOF
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "TerraformStateAccess",
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::${ACCOUNT_ID}:root"
+      },
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:ListBucket"
+      ],
+      "Resource": [
+        "arn:aws:s3:::${BUCKET_NAME}",
+        "arn:aws:s3:::${BUCKET_NAME}/*"
+      ]
+    }
+  ]
+}
+EOF
+)
+            echo "Setting bucket policy..."
+            echo "$BUCKET_POLICY" | aws s3api put-bucket-policy --bucket "$BUCKET_NAME" --policy file:///dev/stdin
             echo "S3 bucket created successfully"
           fi
-
-          echo "Checking DynamoDB table: $TABLE_NAME"
+          
+          echo ""
+          echo "=== Checking DynamoDB table: $TABLE_NAME ==="
           if aws dynamodb describe-table --table-name "$TABLE_NAME" --region "$REGION" 2>/dev/null; then
-            echo "DynamoDB table already exists"
+            echo "DynamoDB table exists, checking permissions..."
+            aws dynamodb get-item --table-name "$TABLE_NAME" --key '{"LockID":{"S":"test"}}' --region "$REGION" 2>&1 | head -1 || echo "Table accessible"
           else
             echo "Creating DynamoDB table: $TABLE_NAME"
             aws dynamodb create-table \
@@ -77,7 +125,33 @@ jobs:
             aws dynamodb wait table-exists --table-name "$TABLE_NAME" --region "$REGION"
             echo "DynamoDB table created successfully"
           fi
-
+          
+          echo ""
+          echo ""
+          echo "=== Testing backend access ==="
+          echo "Testing S3 write access..."
+          if echo "test" | aws s3 cp - "s3://$BUCKET_NAME/test-access.txt" 2>&1; then
+            aws s3 rm "s3://$BUCKET_NAME/test-access.txt" 2>&1
+            echo "✓ S3 write access OK"
+          else
+            echo "✗ S3 write access FAILED"
+            echo "This may cause terraform init to fail with AccessDenied"
+            echo "Please check:"
+            echo "  1. Bucket is in the same AWS account"
+            echo "  2. IAM user has s3:PutObject, s3:GetObject, s3:ListBucket permissions"
+            echo "  3. Bucket policy allows access for your account"
+          fi
+          
+          echo "Testing DynamoDB write access..."
+          if aws dynamodb put-item --table-name "$TABLE_NAME" --item '{"LockID":{"S":"test-lock"}}' --region "$REGION" 2>&1; then
+            aws dynamodb delete-item --table-name "$TABLE_NAME" --key '{"LockID":{"S":"test-lock"}}' --region "$REGION" 2>&1
+            echo "✓ DynamoDB write access OK"
+          else
+            echo "✗ DynamoDB write access FAILED"
+            echo "Please check IAM user has dynamodb:PutItem, dynamodb:GetItem, dynamodb:DeleteItem permissions"
+          fi
+          
+          echo ""
           echo "Backend setup completed!"
 
       - name: Setup Terraform
@@ -87,7 +161,7 @@ jobs:
 
       - name: Terraform Init
         working-directory: ./infrastructure/terraform
-        run: terraform init
+        run: terraform init -reconfigure
 
       - name: Terraform Format Check
         working-directory: ./infrastructure/terraform
