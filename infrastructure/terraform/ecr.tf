@@ -1,5 +1,5 @@
 resource "aws_ecr_repository" "main" {
-  name                 = var.ecr_repository_name
+  name                 = lower(var.ecr_repository_name)
   image_tag_mutability = "MUTABLE"
 
   image_scanning_configuration {

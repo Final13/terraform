@@ -49,6 +49,6 @@ variable "node_max_size" {
 variable "ecr_repository_name" {
   description = "Name of ECR repository"
   type        = string
-  default     = "Terraform"
+  default     = "terraform"
 }
 
