@@ -153,6 +153,11 @@ jobs:
         continue-on-error: false
 
       - name: Terraform Apply
-        if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch'
         working-directory: ./infrastructure/terraform
         run: terraform apply -auto-approve tfplan
+
+      - name: Terraform Outputs
+        if: (github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')) || github.event_name == 'workflow_dispatch'
+        working-directory: ./infrastructure/terraform
+        run: terraform output
