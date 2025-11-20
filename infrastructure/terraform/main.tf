@@ -11,7 +11,7 @@ terraform {
   backend "s3" {
     bucket         = "terraform-state-bucket-final"
     key            = "dev/eks-cluster/terraform.tfstate"
-    region         = "us-east-1"
+    region         = "eu-north-1"
     encrypt        = true
     dynamodb_table = "Final"
   }
